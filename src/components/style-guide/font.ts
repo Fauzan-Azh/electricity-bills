@@ -9,7 +9,7 @@ export const FontWeightMap = {
 
 export const Fonts = {
   family: {
-    primary: "'Inter', sans-serif",
+    primary: "'Poppins', sans-serif",
     secondary: "'Poppins', sans-serif",
   },
   heading: {
