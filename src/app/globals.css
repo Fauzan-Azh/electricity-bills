@@ -23,3 +23,15 @@ body {
   color: var(--foreground);
   font-family: var(--font-poppins), sans-serif;
 }
+
+/* Nonaktifkan ikon reveal password bawaan (Edge/IE/variasi Chromium) */
+input[type='password']::-ms-reveal,
+input[type='password']::-ms-clear {
+  display: none;
+}
+
+/* Sembunyikan tombol autofill/reveal khusus WebKit jika ada */
+input[type='password']::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  display: none;
+}

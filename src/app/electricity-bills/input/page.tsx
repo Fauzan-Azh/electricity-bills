@@ -8,16 +8,17 @@ export default function ElectricityBillsInputPage() {
     namaPanel: '',
     bulan: '',
     jumlahKwh: '',
-    tagihanListrik: ''
+    tagihanListrik: '',
+    panelBaru: ''
   });
 
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [showNamaPanelDropdown, setShowNamaPanelDropdown] = useState(false);
-
-  const namaPanelOptions = [
+  const [showPanelBaruInput, setShowPanelBaruInput] = useState(false);
+  const [namaPanelOptions, setNamaPanelOptions] = useState([
     'GL 01', 'GL 02', 'GOR 01', 'GOR 02', 'Modular 01'
-  ];
+  ]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -30,8 +31,22 @@ export default function ElectricityBillsInputPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validasi semua field harus diisi
-    const isAllFieldsFilled = formData.namaPanel && formData.bulan && formData.jumlahKwh && formData.tagihanListrik;
+    // Jika memilih "Tambah Nama Panel Gedung", validasi panelBaru harus diisi
+    let isAllFieldsFilled = Boolean(formData.namaPanel && formData.bulan && formData.jumlahKwh && formData.tagihanListrik);
+    
+    if (showPanelBaruInput) {
+      isAllFieldsFilled = isAllFieldsFilled && formData.panelBaru.trim() !== '';
+      
+      // Jika semua valid, tambahkan panel baru ke dalam daftar opsi
+      if (isAllFieldsFilled && formData.panelBaru.trim() !== '' && !namaPanelOptions.includes(formData.panelBaru)) {
+        setNamaPanelOptions(prev => [...prev, formData.panelBaru]);
+        // Update namaPanel dengan nilai panel baru
+        setFormData(prev => ({
+          ...prev,
+          namaPanel: formData.panelBaru
+        }));
+      }
+    }
     
     // Validasi input harus berupa angka untuk kWh dan Tagihan
     const isJumlahKwhValid = /^\d+$/.test(formData.jumlahKwh);
@@ -64,6 +79,13 @@ export default function ElectricityBillsInputPage() {
       [field]: value
     }));
     setShowNamaPanelDropdown(false);
+    
+    // Jika memilih "Tambah Nama Panel Gedung", tampilkan form Panel Baru
+    if (value === 'Tambah Nama Panel Gedung') {
+      setShowPanelBaruInput(true);
+    } else {
+      setShowPanelBaruInput(false);
+    }
   };
 
   return (
@@ -227,10 +249,55 @@ export default function ElectricityBillsInputPage() {
                         {option}
                       </div>
                     ))}
+                    <div
+                      className="px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors border-t"
+                      style={{
+                        backgroundColor: 'white',
+                        color: 'black',
+                        fontSize: '16px',
+                        borderTopColor: '#e5e7eb'
+                      }}
+                      onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.backgroundColor = '#D0E7BD'; }}
+                      onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                      onClick={() => handleSelectOption('namaPanel', 'Tambah Nama Panel Gedung')}
+                    >
+                      Tambah Nama Panel Gedung
+                    </div>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Panel Baru Input - Muncul ketika memilih "Tambah Nama Panel Gedung" */}
+            {showPanelBaruInput && (
+              <div className="flex items-center gap-4 justify-center">
+                <label className="font-medium text-gray-900 flex-shrink-0" style={{fontSize: '20px', width: '200px'}}>
+                  Panel Baru :
+                </label>
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    name="panelBaru"
+                    value={formData.panelBaru}
+                    onChange={handleInputChange}
+                    placeholder="Ketik disini !"
+                    className="border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 bg-white"
+                    style={{
+                      width: '648px',
+                      height: '45px',
+                      borderColor: '#646F61',
+                      color: 'black',
+                      fontSize: '16px',
+                      padding: '0 16px'
+                    }}
+                    required
+                  />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Penulisan "NamaGedung NomorPanel". Contoh: Modular 01
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Bulan */}
             <div className="flex items-center gap-4 justify-center">
