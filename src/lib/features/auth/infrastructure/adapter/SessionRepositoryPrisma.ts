@@ -3,7 +3,7 @@ import { SessionRepository } from '@/lib/features/auth/domain/port/SessionReposi
 import { Session } from '@/generated/prisma';
 
 export class PrismaSessionRepository implements SessionRepository {
-  async create(userId: string, refreshToken: string, expiresAt: Date): Promise<Session> {
+  async create(userId: number, refreshToken: string, expiresAt: Date): Promise<Session> {
     return prisma.session.create({ data: { userId, refreshToken, expiresAt } });
   }
 

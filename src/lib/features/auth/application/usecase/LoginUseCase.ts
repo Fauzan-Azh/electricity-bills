@@ -1,5 +1,5 @@
 import { UserRepository } from '../../domain/port/UserRepository';
-import { BcryptService } from '../../infrastructure/adapter/BcryptService';
+import { SHA256Service } from '../../infrastructure/adapter/SHA256Service';
 import { SessionRepository } from '../../domain/port/SessionRepository';
 import { TokenService } from '../../domain/port/TokenService';
 import { AppError } from '@/lib/common/errors/AppError';
@@ -9,19 +9,23 @@ import { LoginRequest } from '@/lib/features/auth/presentation/dto/LoginRequestD
 export class LoginUseCase {
   constructor(
     private userRepo: UserRepository,
-    private bcrypt: BcryptService,
+    private hashService: SHA256Service,
     private sessionRepo: SessionRepository,
     private tokenService: TokenService
   ) {}
 
   async execute({ email, password }: LoginRequest) {
-    const user = await this.userRepo.findByEmail(email);
+    // Coba cari user berdasarkan email dulu, jika tidak ada coba username
+    let user = await this.userRepo.findByEmail(email);
+    if (!user) {
+      // Jika tidak ditemukan via email, coba cari via username
+      user = await this.userRepo.findByUsername(email);
+    }
     if (!user) throw new AppError('Invalid credentials', 401);
 
-    const valid = await this.bcrypt.compare(
-      password,
-      (user as any).passwordHash ?? (user as any).password
-    );
+    // Hash password input dan bandingkan dengan hash di database
+    const passwordHash = (user as any).passwordHash ?? (user as any).password;
+    const valid = this.hashService.compare(password, passwordHash);
     if (!valid) throw new AppError('Invalid credentials', 401);
 
     // access token

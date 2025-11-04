@@ -13,7 +13,7 @@ export class RefreshTokenUseCase {
   async execute({ refreshToken }: RefreshRequest) {
     // verify signature
     try {
-      const payload = this.tokenService.verify<{ userId: string }>(refreshToken);
+      const payload = this.tokenService.verify<{ userId: number }>(refreshToken);
       const session = await this.sessionRepo.findByRefreshToken(refreshToken);
       if (!session) throw new AppError('Invalid refresh token', 401);
       if (payload.userId !== session.userId) {

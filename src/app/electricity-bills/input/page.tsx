@@ -1,11 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { api } from '@/lib/common/utils/api';
+import { useAutoLogout } from '@/lib/hooks/useAutoLogout';
+
+interface Panel {
+  id: number;
+  namePanel: string;
+}
 
 export default function ElectricityBillsInputPage() {
+  // Auto logout setelah 5 menit tidak ada aktivitas
+  useAutoLogout({ idleTime: 300000 }); // 5 menit = 300000ms
+
+  const router = useRouter();
   const [formData, setFormData] = useState({
     namaPanel: '',
+    panelId: 0,
     bulan: '',
     jumlahKwh: '',
     tagihanListrik: '',
@@ -14,78 +27,136 @@ export default function ElectricityBillsInputPage() {
 
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [showNamaPanelDropdown, setShowNamaPanelDropdown] = useState(false);
   const [showPanelBaruInput, setShowPanelBaruInput] = useState(false);
-  const [namaPanelOptions, setNamaPanelOptions] = useState([
-    'GL 01', 'GL 02', 'GOR 01', 'GOR 02', 'Modular 01'
-  ]);
+  const [namaPanelOptions, setNamaPanelOptions] = useState<Panel[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [panelsLoading, setPanelsLoading] = useState(true);
+
+  useEffect(() => {
+    fetchPanels();
+  }, []);
+
+  const fetchPanels = async () => {
+    try {
+      setPanelsLoading(true);
+      const panels = await api.get<Panel[]>('/panel');
+      setNamaPanelOptions(panels);
+    } catch (err: any) {
+      console.error('Error fetching panels:', err);
+      setErrorMessage('Gagal memuat daftar panel');
+    } finally {
+      setPanelsLoading(false);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
+    setFormData((prev: typeof formData) => ({
       ...prev,
       [name]: value
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
+    setErrorMessage('');
     
-    // Jika memilih "Tambah Nama Panel Gedung", validasi panelBaru harus diisi
-    let isAllFieldsFilled = Boolean(formData.namaPanel && formData.bulan && formData.jumlahKwh && formData.tagihanListrik);
-    
-    if (showPanelBaruInput) {
-      isAllFieldsFilled = isAllFieldsFilled && formData.panelBaru.trim() !== '';
-      
-      // Jika semua valid, tambahkan panel baru ke dalam daftar opsi
-      if (isAllFieldsFilled && formData.panelBaru.trim() !== '' && !namaPanelOptions.includes(formData.panelBaru)) {
-        setNamaPanelOptions(prev => [...prev, formData.panelBaru]);
-        // Update namaPanel dengan nilai panel baru
-        setFormData(prev => ({
-          ...prev,
-          namaPanel: formData.panelBaru
-        }));
+    try {
+      // Validasi field kosong - termasuk panel baru jika dipilih
+      if (!formData.bulan || !formData.jumlahKwh || !formData.tagihanListrik) {
+        throw new Error('Silahkan isi field yang kosong');
       }
-    }
-    
-    // Validasi input harus berupa angka untuk kWh dan Tagihan
-    const isJumlahKwhValid = /^\d+$/.test(formData.jumlahKwh);
-    const isTagihanListrikValid = /^\d+$/.test(formData.tagihanListrik);
-    
-    // Jika ada field kosong atau input angka tidak valid, tampilkan error
-    if (!isAllFieldsFilled || !isJumlahKwhValid || !isTagihanListrikValid) {
+
+      // Jika memilih tambah panel baru, validasi panelBaru harus diisi
+      if (showPanelBaruInput && !formData.panelBaru.trim()) {
+        throw new Error('Silahkan isi field Panel Baru yang kosong');
+      }
+
+      // Validasi nama panel harus dipilih atau panel baru diisi
+      if (!showPanelBaruInput && !formData.namaPanel) {
+        throw new Error('Silahkan pilih atau tambah nama panel');
+      }
+
+      // Jika panel baru, buat panel dulu
+      let panelId = formData.panelId;
+      if (showPanelBaruInput && formData.panelBaru.trim()) {
+        const newPanel = await api.post<Panel>('/panel', {
+          namePanel: formData.panelBaru.trim()
+        });
+        panelId = newPanel.id;
+      } else if (!panelId) {
+        // Cari panel berdasarkan name
+        const selectedPanel = namaPanelOptions.find((p: Panel) => p.namePanel === formData.namaPanel);
+        if (!selectedPanel) {
+          throw new Error('Panel tidak ditemukan');
+        }
+        panelId = selectedPanel.id;
+      }
+
+      // Validasi input angka
+      const kwhValue = parseFloat(formData.jumlahKwh);
+      const tagihanValue = parseFloat(formData.tagihanListrik);
+      
+      if (isNaN(kwhValue) || kwhValue <= 0) {
+        throw new Error('Jumlah kWh harus berupa angka yang valid');
+      }
+      
+      if (isNaN(tagihanValue) || tagihanValue <= 0) {
+        throw new Error('Tagihan listrik harus berupa angka yang valid');
+      }
+
+      // Get current user ID (dari localStorage atau context)
+      // For now, using userId 1 as default
+      const userId = 1; // TODO: Get from auth context
+
+      // Submit data ke API
+      const billingMonth = new Date(formData.bulan + '-01');
+      
+      await api.post('/electricity-bills', {
+        panelId,
+        userId,
+        billingMonth: billingMonth.toISOString(),
+        kwhUse: kwhValue,
+        totalBills: tagihanValue,
+        statusPay: 'Belum Lunas', // Default value
+        vaStatus: '' // Optional
+      });
+
+      setShowSuccessModal(true);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Gagal menyimpan data');
       setShowErrorModal(true);
-      return;
+    } finally {
+      setLoading(false);
     }
-    
-    // Logic untuk menyimpan data akan ditambahkan nanti
-    console.log('Data yang disimpan:', formData);
-    setShowSuccessModal(true);
   };
 
   const handleCloseSuccessModal = () => {
     setShowSuccessModal(false);
-    // Redirect kembali ke halaman electricity bills
-    window.location.href = '/electricity-bills';
+    router.push('/electricity-bills');
   };
 
   const handleCloseErrorModal = () => {
     setShowErrorModal(false);
+    setErrorMessage('');
   };
 
-  const handleSelectOption = (field: string, value: string) => {
-    setFormData(prev => ({
+  const handleSelectOption = (panel: Panel) => {
+    setFormData((prev: typeof formData) => ({
       ...prev,
-      [field]: value
+      namaPanel: panel.namePanel,
+      panelId: panel.id
     }));
     setShowNamaPanelDropdown(false);
-    
-    // Jika memilih "Tambah Nama Panel Gedung", tampilkan form Panel Baru
-    if (value === 'Tambah Nama Panel Gedung') {
-      setShowPanelBaruInput(true);
-    } else {
-      setShowPanelBaruInput(false);
-    }
+    setShowPanelBaruInput(false);
+  };
+
+  const handleSelectNewPanel = () => {
+    setShowPanelBaruInput(true);
+    setShowNamaPanelDropdown(false);
   };
 
   return (
@@ -211,7 +282,7 @@ export default function ElectricityBillsInputPage() {
                   }}
                   onClick={() => setShowNamaPanelDropdown(!showNamaPanelDropdown)}
                 >
-                  {formData.namaPanel || 'Pilih nama panel gedung'}
+                  {panelsLoading ? 'Memuat panel...' : (formData.namaPanel || 'Pilih nama panel gedung')}
                 </div>
                 <svg
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
@@ -233,9 +304,9 @@ export default function ElectricityBillsInputPage() {
                     className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto"
                     style={{ borderColor: '#646F61' }}
                   >
-                    {namaPanelOptions.map((option, index) => (
+                    {namaPanelOptions.map((panel) => (
                       <div
-                        key={index}
+                        key={panel.id}
                         className="px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
                         style={{
                           backgroundColor: 'white',
@@ -244,9 +315,9 @@ export default function ElectricityBillsInputPage() {
                         }}
                         onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.backgroundColor = '#D0E7BD'; }}
                         onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.backgroundColor = 'white'; }}
-                        onClick={() => handleSelectOption('namaPanel', option)}
+                        onClick={() => handleSelectOption(panel)}
                       >
-                        {option}
+                        {panel.namePanel}
                       </div>
                     ))}
                     <div
@@ -259,7 +330,7 @@ export default function ElectricityBillsInputPage() {
                       }}
                       onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.backgroundColor = '#D0E7BD'; }}
                       onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.backgroundColor = 'white'; }}
-                      onClick={() => handleSelectOption('namaPanel', 'Tambah Nama Panel Gedung')}
+                      onClick={handleSelectNewPanel}
                     >
                       Tambah Nama Panel Gedung
                     </div>
@@ -387,7 +458,8 @@ export default function ElectricityBillsInputPage() {
             <div className="flex justify-center" style={{marginTop: '91px'}}>
               <button
                 type="submit"
-                className="text-white rounded-lg font-medium transition-colors duration-200"
+                disabled={loading}
+                className="text-white rounded-lg font-medium transition-colors duration-200 disabled:opacity-60"
                 style={{
                   backgroundColor: '#172813',
                   width: '500px',
@@ -397,7 +469,7 @@ export default function ElectricityBillsInputPage() {
                 onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#1a2f15'; }}
                 onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#172813'; }}
               >
-                Simpan Data
+                {loading ? 'Menyimpan...' : 'Simpan Data'}
               </button>
             </div>
           </form>
@@ -510,7 +582,7 @@ export default function ElectricityBillsInputPage() {
                 Data anda tidak berhasil disimpan!
               </h3>
               <p className="text-sm text-gray-500">
-                *Silahkan cek kembali data yang anda inputkan
+                {errorMessage || '*Silahkan cek kembali data yang anda inputkan'}
               </p>
             </div>
           </div>

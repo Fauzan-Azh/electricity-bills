@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { api } from '@/lib/common/utils/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,17 +18,23 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      // Mock login tanpa backend: valid jika kedua field diisi
       if (!username || !password) {
         throw new Error('Harap isi username dan password');
       }
-      const fakeAccess = 'fake-access-token';
-      const fakeRefresh = 'fake-refresh-token';
-      localStorage.setItem('accessToken', fakeAccess);
-      localStorage.setItem('refreshToken', fakeRefresh);
-      router.push('/dashboard');
+
+      // Login dengan username atau email (backend akan handle kedua-duanya)
+      const response = await api.post<{ accessToken: string; refreshToken: string; user: any }>(
+        '/auth/login',
+        { email: username, password } // Field 'email' bisa berisi email atau username
+      );
+
+      if (response.accessToken) {
+        localStorage.setItem('accessToken', response.accessToken);
+        localStorage.setItem('refreshToken', response.refreshToken);
+        router.push('/dashboard');
+      }
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Username atau password salah');
     } finally {
       setLoading(false);
     }

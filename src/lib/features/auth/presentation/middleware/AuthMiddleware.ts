@@ -10,7 +10,7 @@ export async function requireAuth(req: NextApiRequest, res: NextApiResponse) {
       res.status(401).json({ error: 'Unauthorized' });
       return null;
     }
-    return tokenService.verify<{ userId: string }>(auth);
+    return tokenService.verify<{ userId: number }>(auth);
   } catch (err) {
     logger.error(err);
     res.status(401).json({ error: 'Unauthorized' });

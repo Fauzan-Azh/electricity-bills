@@ -1,8 +1,188 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/common/utils/api';
+import { useAutoLogout } from '@/lib/hooks/useAutoLogout';
+
+interface ElectricityBill {
+  id: number;
+  panel: {
+    id: number;
+    namePanel: string;
+  };
+  user: {
+    id: number;
+    username: string | null;
+  };
+  billingMonth: string;
+  kwhUse: number;
+  totalBills: number;
+  statusPay: string;
+  vaStatus?: string;
+}
 
 export default function ElectricityBillsPage() {
+  // Auto logout setelah 5 menit tidak ada aktivitas
+  useAutoLogout({ idleTime: 300000 }); // 5 menit = 300000ms
+
+  const [bills, setBills] = useState<ElectricityBill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingBill, setEditingBill] = useState<ElectricityBill | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    panelId: 0,
+    bulan: '',
+    jumlahKwh: '',
+    tagihanListrik: '',
+    statusPay: '',
+  });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchBills();
+  }, []);
+
+  const fetchBills = async () => {
+    try {
+      setLoading(true);
+      const data = await api.get<ElectricityBill[]>('/electricity-bills');
+      setBills(data);
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat data');
+      console.error('Error fetching bills:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+    }).format(amount);
+  };
+
+  const handleEdit = (bill: ElectricityBill) => {
+    setEditingBill(bill);
+    // Format billingMonth untuk input date (YYYY-MM)
+    const billingDate = new Date(bill.billingMonth);
+    const year = billingDate.getFullYear();
+    const month = String(billingDate.getMonth() + 1).padStart(2, '0');
+    
+    setEditFormData({
+      panelId: bill.panel.id,
+      bulan: `${year}-${month}`,
+      jumlahKwh: String(bill.kwhUse),
+      tagihanListrik: String(bill.totalBills),
+      statusPay: bill.statusPay,
+    });
+    setShowEditModal(true);
+    setEditError(null);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBill) return;
+
+    setEditLoading(true);
+    setEditError(null);
+
+    try {
+      // Validasi
+      if (!editFormData.bulan || !editFormData.jumlahKwh || !editFormData.tagihanListrik) {
+        throw new Error('Silahkan isi semua field yang wajib');
+      }
+
+      const kwhValue = parseFloat(editFormData.jumlahKwh);
+      const tagihanValue = parseFloat(editFormData.tagihanListrik);
+
+      if (isNaN(kwhValue) || kwhValue <= 0) {
+        throw new Error('Jumlah kWh harus berupa angka yang valid');
+      }
+      if (isNaN(tagihanValue) || tagihanValue <= 0) {
+        throw new Error('Tagihan listrik harus berupa angka yang valid');
+      }
+
+      const billingMonth = new Date(editFormData.bulan + '-01');
+
+      // Update data
+      await api.put(`/electricity-bills/${editingBill.id}`, {
+        panelId: editFormData.panelId,
+        billingMonth: billingMonth.toISOString(),
+        kwhUse: kwhValue,
+        totalBills: tagihanValue,
+        statusPay: editFormData.statusPay || 'Belum Lunas',
+      });
+
+      // Refresh data
+      await fetchBills();
+      setShowEditModal(false);
+      setEditingBill(null);
+    } catch (err: any) {
+      setEditError(err.message || 'Gagal mengupdate data');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditModal(false);
+    setEditingBill(null);
+    setEditError(null);
+  };
+
+  const handleExportData = () => {
+    try {
+      // Prepare CSV header
+      const headers = ['No', 'Nama Panel', 'Bulan', 'kWh', 'Jumlah Tagihan', 'Status Pembayaran'];
+      
+      // Convert bills to CSV rows
+      const csvRows = [
+        headers.join(','),
+        ...bills.map((bill, index) => {
+          const date = new Date(bill.billingMonth);
+          const month = date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+          const totalBills = Number(bill.totalBills).toLocaleString('id-ID');
+          
+          return [
+            index + 1,
+            `"${bill.panel.namePanel}"`,
+            `"${month}"`,
+            bill.kwhUse,
+            totalBills,
+            `"${bill.statusPay}"`
+          ].join(',');
+        })
+      ];
+      
+      // Create CSV content
+      const csvContent = csvRows.join('\n');
+      
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `data_tagihan_listrik_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      alert('Gagal mengekspor data: ' + (err.message || 'Terjadi kesalahan'));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white font-sans">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
@@ -15,7 +195,13 @@ export default function ElectricityBillsPage() {
         <div className="flex justify-center items-center mb-4">
           {/* Left side buttons */}
           <div className="flex" style={{gap: '17px'}}>
-            <button className="text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200" style={{backgroundColor: '#172813', fontSize: '20px'}} onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#1a2f15'; }} onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#172813'; }}>
+            <button 
+              className="text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200" 
+              style={{backgroundColor: '#172813', fontSize: '20px'}} 
+              onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#1a2f15'; }} 
+              onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#172813'; }}
+              onClick={handleExportData}
+            >
               Export Data
             </button>
             <Link
@@ -93,32 +279,176 @@ export default function ElectricityBillsPage() {
             
             {/* Table Body */}
             <tbody>
-              {[1, 2, 3, 4, 5, 6].map((row, index) => (
-                <tr key={row} className="hover:bg-gray-50">
-                  <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r" style={{borderColor: '#345915', borderBottom: index === 5 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                    
-                  </td>
-                  <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r" style={{borderColor: '#345915', borderBottom: index === 5 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                    
-                  </td>
-                  <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r" style={{borderColor: '#345915', borderBottom: index === 5 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                    
-                  </td>
-                  <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r" style={{borderColor: '#345915', borderBottom: index === 5 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                    
-                  </td>
-                  <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r" style={{borderColor: '#345915', borderBottom: index === 5 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                    
-                  </td>
-                  <td className="px-6 py-6 whitespace-nowrap text-gray-900" style={{borderBottom: index === 5 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                    
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-6 text-center text-gray-500" style={{fontSize: '20px'}}>
+                    Memuat data...
                   </td>
                 </tr>
-              ))}
+              ) : error ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-6 text-center text-red-500" style={{fontSize: '20px'}}>
+                    {error}
+                  </td>
+                </tr>
+              ) : bills.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-6 text-center text-gray-500" style={{fontSize: '20px'}}>
+                    Belum ada data
+                  </td>
+                </tr>
+              ) : (
+                bills.map((bill, index) => (
+                  <tr key={bill.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
+                      {index + 1}
+                    </td>
+                    <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
+                      {bill.panel.namePanel}
+                    </td>
+                    <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
+                      {formatDate(bill.billingMonth)}
+                    </td>
+                    <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
+                      {bill.kwhUse}
+                    </td>
+                    <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
+                      {formatCurrency(Number(bill.totalBills))}
+                    </td>
+                    <td className="px-6 py-6 whitespace-nowrap text-gray-900 text-center" style={{borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
+                      <div className="flex justify-center gap-2">
+                        <button
+                          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                          onClick={() => handleEdit(bill)}
+                        >
+                          Edit
+                        </button>
+                        {/* <button
+                          className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                          onClick={async () => {
+                            if (confirm('Yakin ingin menghapus?')) {
+                              try {
+                                await api.delete(`/electricity-bills/${bill.id}`);
+                                fetchBills();
+                              } catch (err) {
+                                alert('Gagal menghapus data');
+                              }
+                            }
+                          }}
+                        >
+                          Hapus
+                        </button> */}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
           </div>
         </div>
+
+        {/* Edit Modal */}
+        {showEditModal && editingBill && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style={{ paddingTop: '80px', top: 0 }}>
+            <div className="bg-white rounded-lg p-8 max-w-2xl w-full mx-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+              <h2 className="text-2xl font-bold mb-6 text-gray-900">Edit Data Tagihan Listrik</h2>
+              
+              <form onSubmit={handleEditSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nama Panel
+                  </label>
+                  <input
+                    type="text"
+                    value={editingBill.panel.namePanel}
+                    disabled
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2 bg-gray-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bulan <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="month"
+                    value={editFormData.bulan}
+                    onChange={(e) => setEditFormData({ ...editFormData, bulan: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Jumlah kWh <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editFormData.jumlahKwh}
+                    onChange={(e) => setEditFormData({ ...editFormData, jumlahKwh: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tagihan Listrik <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editFormData.tagihanListrik}
+                    onChange={(e) => setEditFormData({ ...editFormData, tagihanListrik: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Status Pembayaran
+                  </label>
+                  <select
+                    value={editFormData.statusPay}
+                    onChange={(e) => setEditFormData({ ...editFormData, statusPay: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2"
+                  >
+                    <option value="Belum Lunas">Belum Lunas</option>
+                    <option value="Lunas">Lunas</option>
+                  </select>
+                </div>
+
+                {editError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                    {editError}
+                  </div>
+                )}
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleCloseEditModal}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                    disabled={editLoading}
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                    disabled={editLoading}
+                  >
+                    {editLoading ? 'Menyimpan...' : 'Simpan'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

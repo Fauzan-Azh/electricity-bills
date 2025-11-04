@@ -2,11 +2,22 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { api } from '@/lib/common/utils/api';
+import { useAutoLogout } from '@/lib/hooks/useAutoLogout';
 
 export default function ImportDataPage() {
+  // Auto logout setelah 5 menit tidak ada aktivitas
+  useAutoLogout({ idleTime: 300000 });
+
+  const router = useRouter();
   const [dragActive, setDragActive] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -43,24 +54,178 @@ export default function ImportDataPage() {
     }
   };
 
-  const handleImportData = () => {
-    if (selectedFile) {
-      // Handle import logic here
-      console.log('Importing file:', selectedFile);
-      // You can add your import logic here
-    } else {
-      alert('Pilih file terlebih dahulu');
+  const parseCSV = (text: string): string[][] => {
+    const rows: string[][] = [];
+    const lines = text.split('\n');
+    
+    for (const line of lines) {
+      if (line.trim()) {
+        // Simple CSV parsing (handles quoted fields)
+        const row: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            row.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        row.push(current.trim());
+        rows.push(row);
+      }
+    }
+    
+    return rows;
+  };
+
+  const handleImportData = async () => {
+    if (!selectedFile) {
+      setErrorMessage('Pilih file terlebih dahulu');
+      setShowErrorModal(true);
+      return;
+    }
+
+    if (!selectedFile.name.endsWith('.csv')) {
+      setErrorMessage('File harus berformat CSV');
+      setShowErrorModal(true);
+      return;
+    }
+
+    setImporting(true);
+    setErrorMessage('');
+
+    try {
+      // Read file
+      const text = await selectedFile.text();
+      const rows = parseCSV(text);
+
+      if (rows.length < 2) {
+        throw new Error('File CSV minimal harus memiliki header dan 1 baris data');
+      }
+
+      // Skip header row
+      const dataRows = rows.slice(1);
+      const errors: string[] = [];
+      let successCount = 0;
+
+      // Get panels for mapping
+      const panels = await api.get<Array<{ id: number; namePanel: string }>>('/panel');
+      const panelMap = new Map(panels.map(p => [p.namePanel.toLowerCase(), p.id]));
+
+      // Process each row
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
+        
+        if (row.length < 4) {
+          errors.push(`Baris ${i + 2}: Data tidak lengkap`);
+          continue;
+        }
+
+        try {
+          const panelName = row[0]?.trim() || '';
+          const bulan = row[1]?.trim() || '';
+          const kwhUse = parseFloat(row[2]?.trim() || '0');
+          const totalBills = parseFloat(row[3]?.replace(/[^\d.]/g, '') || '0');
+          const statusPay = row[4]?.trim() || 'Belum Lunas';
+
+          // Validasi
+          if (!panelName) {
+            errors.push(`Baris ${i + 2}: Nama Panel kosong`);
+            continue;
+          }
+
+          const panelId = panelMap.get(panelName.toLowerCase());
+          if (!panelId) {
+            errors.push(`Baris ${i + 2}: Panel "${panelName}" tidak ditemukan`);
+            continue;
+          }
+
+          if (!bulan || !/^\d{4}-\d{2}$/.test(bulan)) {
+            errors.push(`Baris ${i + 2}: Format bulan tidak valid (harus YYYY-MM)`);
+            continue;
+          }
+
+          if (isNaN(kwhUse) || kwhUse <= 0) {
+            errors.push(`Baris ${i + 2}: kWh tidak valid`);
+            continue;
+          }
+
+          if (isNaN(totalBills) || totalBills <= 0) {
+            errors.push(`Baris ${i + 2}: Jumlah tagihan tidak valid`);
+            continue;
+          }
+
+          // Create bill
+          const billingMonth = new Date(bulan + '-01');
+          const userId = 1; // TODO: Get from auth context
+
+          await api.post('/electricity-bills', {
+            panelId,
+            userId,
+            billingMonth: billingMonth.toISOString(),
+            kwhUse,
+            totalBills,
+            statusPay,
+            vaStatus: ''
+          });
+
+          successCount++;
+        } catch (err: any) {
+          errors.push(`Baris ${i + 2}: ${err.message || 'Gagal menyimpan'}`);
+        }
+      }
+
+      if (errors.length > 0 && successCount === 0) {
+        throw new Error(`Semua data gagal diimport:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... dan ${errors.length - 5} error lainnya` : ''}`);
+      }
+
+      if (successCount > 0) {
+        setShowSuccessModal(true);
+      }
+
+      if (errors.length > 0 && successCount > 0) {
+        setErrorMessage(`Berhasil mengimport ${successCount} data. ${errors.length} data gagal:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n... dan ${errors.length - 5} error lainnya` : ''}`);
+        setShowErrorModal(true);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Gagal mengimport data');
+      setShowErrorModal(true);
+    } finally {
+      setImporting(false);
     }
   };
 
   const handleDownloadTemplate = () => {
-    // Create a temporary link element to download the CSV template
+    // Create CSV template
+    const headers = ['Nama Panel', 'Bulan (YYYY-MM)', 'kWh', 'Jumlah Tagihan', 'Status Pembayaran'];
+    const exampleRow = ['GL 01', '2024-01', '1500.50', '2500000', 'Belum Lunas'];
+    
+    const csvContent = [
+      headers.join(','),
+      exampleRow.join(','),
+      'GL 02,2024-02,2000.00,3000000,Lunas'
+    ].join('\n');
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    link.href = '/file/template_import_electricity.csv';
-    link.download = 'template_import_electricity.csv'; // Download with original filename
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'template_import_electricity.csv');
+    link.style.visibility = 'hidden';
+    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     
     // Show success modal
     setShowDownloadModal(true);
@@ -240,20 +405,112 @@ export default function ImportDataPage() {
         <div className="flex justify-center mt-8">
           <button
             onClick={handleImportData}
-            className="inline-flex items-center justify-center text-white rounded-lg font-medium transition-colors duration-200"
+            disabled={importing || !selectedFile}
+            className="inline-flex items-center justify-center text-white rounded-lg font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               backgroundColor: '#172813',
               fontSize: '20px',
               width: '600px',
               height: '45px'
             }}
-            onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#1a2f15'; }}
-            onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.backgroundColor = '#172813'; }}
+            onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => { 
+              if (!e.currentTarget.disabled) {
+                e.currentTarget.style.backgroundColor = '#1a2f15';
+              }
+            }}
+            onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => { 
+              e.currentTarget.style.backgroundColor = '#172813';
+            }}
           >
-            <span>Import Data</span>
+            <span>{importing ? 'Mengimport...' : 'Import Data'}</span>
           </button>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ paddingTop: '80px', top: 0 }}>
+          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => { setShowSuccessModal(false); router.push('/electricity-bills'); }}></div>
+          <div 
+            className="relative bg-white rounded-lg"
+            style={{
+              width: '408px',
+              height: '226px',
+              boxShadow: '0 35px 60px -12px rgba(94, 161, 39, 0.5), 0 0 0 1px rgba(94, 161, 39, 0.1)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <button
+              onClick={() => { setShowSuccessModal(false); router.push('/electricity-bills'); }}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="flex justify-center mb-4">
+              <div 
+                className="w-16 h-16 rounded-full flex items-center justify-center"
+                style={{
+                  backgroundColor: '#5EA127',
+                  boxShadow: '0 15px 35px -5px rgba(94, 161, 39, 0.6), 0 0 0 1px rgba(94, 161, 39, 0.2)'
+                }}
+              >
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-gray-900">
+                Data berhasil diimport
+              </h3>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ paddingTop: '80px', top: 0 }}>
+          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setShowErrorModal(false)}></div>
+          <div 
+            className="relative bg-white rounded-lg p-6 max-w-md w-full mx-4"
+            style={{
+              boxShadow: '0 35px 60px -12px rgba(0, 0, 0, 0.5)',
+              maxHeight: '80vh',
+              overflowY: 'auto'
+            }}
+          >
+            <button
+              onClick={() => setShowErrorModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center bg-red-100">
+                <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Gagal Import Data
+              </h3>
+              <p className="text-sm text-gray-600 whitespace-pre-line text-left">
+                {errorMessage}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Download Success Modal */}
       {showDownloadModal && (

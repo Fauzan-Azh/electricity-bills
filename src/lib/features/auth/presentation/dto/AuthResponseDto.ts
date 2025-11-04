@@ -1,6 +1,12 @@
 export type AuthResponse = {
-  user: { id: string; email: string; name?: string | null };
+  user: { 
+    id: number; 
+    email?: string | null; 
+    username?: string | null; 
+    name?: string | null;
+    role?: string;
+  };
   accessToken: string;
   refreshToken: string;
-  expiresAt: string;
+  expiresAt: Date;
 };
