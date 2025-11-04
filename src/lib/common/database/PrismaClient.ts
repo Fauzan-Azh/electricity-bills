@@ -15,7 +15,7 @@ const basePrisma =
       { emit: 'event', level: 'info' },
       { emit: 'event', level: 'warn' },
     ],
-  });
+  }) as PrismaClient;
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error

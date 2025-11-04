@@ -3,9 +3,38 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 export default function Navbar() {
   const pathname = usePathname();
+  const [userUsername, setUserUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Ambil username dari localStorage
+    const username = localStorage.getItem('userUsername');
+    setUserUsername(username);
+
+    // Listen untuk perubahan localStorage (jika ada update di halaman lain)
+    const handleStorageChange = () => {
+      const updatedUsername = localStorage.getItem('userUsername');
+      setUserUsername(updatedUsername);
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Juga listen untuk custom event untuk update di tab yang sama
+    const handleCustomStorageChange = () => {
+      const updatedUsername = localStorage.getItem('userUsername');
+      setUserUsername(updatedUsername);
+    };
+
+    window.addEventListener('userUpdated', handleCustomStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userUpdated', handleCustomStorageChange);
+    };
+  }, []);
 
   return (
     <nav className="bg-white w-full shadow-sm font-sans">
@@ -24,15 +53,16 @@ export default function Navbar() {
 
             {/* Navigation Links */}
             <div className="flex items-center space-x-8">
+            {/* Dashboard - selalu ditampilkan */}
             <Link
-              href="/"
+              href="/dashboard"
               className={`flex items-center space-x-2 transition-colors duration-200 px-4 py-2 rounded-lg ${
-                pathname === '/' 
+                pathname === '/dashboard' 
                   ? 'border-2 text-gray-800' 
                   : 'text-gray-700 border-2 border-transparent'
               }`}
               style={{
-                borderColor: pathname === '/' ? '#172813' : 'transparent'
+                borderColor: pathname === '/dashboard' ? '#172813' : 'transparent'
               }}
             >
                 <svg
@@ -58,73 +88,79 @@ export default function Navbar() {
                 <span className="font-medium">Dashboard</span>
               </Link>
 
-            <Link
-              href="/electricity-bills"
-              className={`flex items-center space-x-2 transition-colors duration-200 px-4 py-2 rounded-lg ${
-                pathname === '/electricity-bills' || pathname.startsWith('/electricity-bills/')
-                  ? 'border-2 text-gray-800' 
-                  : 'text-gray-700 border-2 border-transparent'
-              }`}
-              style={{
-                borderColor: (pathname === '/electricity-bills' || pathname.startsWith('/electricity-bills/')) ? '#172813' : 'transparent'
-              }}
-            >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M3 5h12M3 9h9M3 13h6"
-                  />
-                </svg>
-                <span className="font-medium">Tagihan Listrik</span>
-              </Link>
+            {/* Tagihan Listrik - hanya untuk Facility management */}
+            {userUsername === 'Facility management' && (
+              <Link
+                href="/electricity-bills"
+                className={`flex items-center space-x-2 transition-colors duration-200 px-4 py-2 rounded-lg ${
+                  pathname === '/electricity-bills' || pathname.startsWith('/electricity-bills/')
+                    ? 'border-2 text-gray-800' 
+                    : 'text-gray-700 border-2 border-transparent'
+                }`}
+                style={{
+                  borderColor: (pathname === '/electricity-bills' || pathname.startsWith('/electricity-bills/')) ? '#172813' : 'transparent'
+                }}
+              >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 12l2 2 4-4"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 5h12M3 9h9M3 13h6"
+                    />
+                  </svg>
+                  <span className="font-medium">Tagihan Listrik</span>
+                </Link>
+            )}
 
-            <Link
-              href="/student-housing"
-              className={`flex items-center space-x-2 transition-colors duration-200 px-4 py-2 rounded-lg ${
-                pathname === '/student-housing' || pathname.startsWith('/student-housing/')
-                  ? 'border-2 text-gray-800' 
-                  : 'text-gray-700 border-2 border-transparent'
-              }`}
-              style={{
-                borderColor: (pathname === '/student-housing' || pathname.startsWith('/student-housing/')) ? '#172813' : 'transparent'
-              }}
-            >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M22 10v6M2 10l10-5 10 5-10 5z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 12v5c3 3 9 3 12 0v-5"
-                  />
-                </svg>
-                <span className="font-medium">Asrama Beasiswa</span>
-              </Link>
+            {/* Asrama Beasiswa - hanya untuk student hausing */}
+            {userUsername === 'student hausing' && (
+              <Link
+                href="/student-housing"
+                className={`flex items-center space-x-2 transition-colors duration-200 px-4 py-2 rounded-lg ${
+                  pathname === '/student-housing' || pathname.startsWith('/student-housing/')
+                    ? 'border-2 text-gray-800' 
+                    : 'text-gray-700 border-2 border-transparent'
+                }`}
+                style={{
+                  borderColor: (pathname === '/student-housing' || pathname.startsWith('/student-housing/')) ? '#172813' : 'transparent'
+                }}
+              >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M22 10v6M2 10l10-5 10 5-10 5z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 12v5c3 3 9 3 12 0v-5"
+                    />
+                  </svg>
+                  <span className="font-medium">Asrama Beasiswa</span>
+                </Link>
+            )}
             </div>
           </div>
         </div>

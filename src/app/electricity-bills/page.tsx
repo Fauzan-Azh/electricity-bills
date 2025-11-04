@@ -40,6 +40,9 @@ export default function ElectricityBillsPage() {
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [showExportSuccessModal, setShowExportSuccessModal] = useState(false);
+  const [showExportErrorModal, setShowExportErrorModal] = useState(false);
+  const [exportErrorMessage, setExportErrorMessage] = useState<string>('');
 
   useEffect(() => {
     fetchBills();
@@ -48,11 +51,13 @@ export default function ElectricityBillsPage() {
   const fetchBills = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await api.get<ElectricityBill[]>('/electricity-bills');
-      setBills(data);
+      setBills(data || []);
     } catch (err: any) {
       setError(err.message || 'Gagal memuat data');
       console.error('Error fetching bills:', err);
+      setBills([]);
     } finally {
       setLoading(false);
     }
@@ -77,12 +82,20 @@ export default function ElectricityBillsPage() {
     const year = billingDate.getFullYear();
     const month = String(billingDate.getMonth() + 1).padStart(2, '0');
     
+    // Handle Decimal type from Prisma (might be string or number)
+    const kwhValue = typeof bill.kwhUse === 'string' 
+      ? parseFloat(bill.kwhUse) 
+      : Number(bill.kwhUse);
+    const totalBillsValue = typeof bill.totalBills === 'string'
+      ? parseFloat(bill.totalBills)
+      : Number(bill.totalBills);
+    
     setEditFormData({
-      panelId: bill.panel.id,
+      panelId: bill.panel?.id || 0,
       bulan: `${year}-${month}`,
-      jumlahKwh: String(bill.kwhUse),
-      tagihanListrik: String(bill.totalBills),
-      statusPay: bill.statusPay,
+      jumlahKwh: String(kwhValue),
+      tagihanListrik: String(totalBillsValue),
+      statusPay: bill.statusPay || 'Belum Lunas',
     });
     setShowEditModal(true);
     setEditError(null);
@@ -141,6 +154,12 @@ export default function ElectricityBillsPage() {
 
   const handleExportData = () => {
     try {
+      if (!bills || bills.length === 0) {
+        setExportErrorMessage('Tidak ada data untuk diekspor');
+        setShowExportErrorModal(true);
+        return;
+      }
+
       // Prepare CSV header
       const headers = ['No', 'Nama Panel', 'Bulan', 'kWh', 'Jumlah Tagihan', 'Status Pembayaran'];
       
@@ -150,15 +169,22 @@ export default function ElectricityBillsPage() {
         ...bills.map((bill, index) => {
           const date = new Date(bill.billingMonth);
           const month = date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-          const totalBills = Number(bill.totalBills).toLocaleString('id-ID');
+          // Handle Decimal type from Prisma (might be string or number)
+          const totalBillsValue = typeof bill.totalBills === 'string' 
+            ? parseFloat(bill.totalBills) 
+            : Number(bill.totalBills);
+          const kwhValue = typeof bill.kwhUse === 'string'
+            ? parseFloat(bill.kwhUse)
+            : Number(bill.kwhUse);
+          const totalBills = totalBillsValue.toLocaleString('id-ID');
           
           return [
             index + 1,
-            `"${bill.panel.namePanel}"`,
+            `"${bill.panel?.namePanel || ''}"`,
             `"${month}"`,
-            bill.kwhUse,
+            kwhValue,
             totalBills,
-            `"${bill.statusPay}"`
+            `"${bill.statusPay || ''}"`
           ].join(',');
         })
       ];
@@ -178,9 +204,24 @@ export default function ElectricityBillsPage() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      // Tampilkan modal success
+      setShowExportSuccessModal(true);
     } catch (err: any) {
-      alert('Gagal mengekspor data: ' + (err.message || 'Terjadi kesalahan'));
+      console.error('Export error:', err);
+      setExportErrorMessage(err.message || 'Terjadi kesalahan saat mengekspor data');
+      setShowExportErrorModal(true);
     }
+  };
+
+  const handleCloseExportSuccessModal = () => {
+    setShowExportSuccessModal(false);
+  };
+
+  const handleCloseExportErrorModal = () => {
+    setShowExportErrorModal(false);
+    setExportErrorMessage('');
   };
 
   return (
@@ -304,16 +345,16 @@ export default function ElectricityBillsPage() {
                       {index + 1}
                     </td>
                     <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                      {bill.panel.namePanel}
+                      {bill.panel?.namePanel || '-'}
                     </td>
                     <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
                       {formatDate(bill.billingMonth)}
                     </td>
                     <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                      {bill.kwhUse}
+                      {typeof bill.kwhUse === 'string' ? parseFloat(bill.kwhUse) : Number(bill.kwhUse)}
                     </td>
                     <td className="px-6 py-6 whitespace-nowrap text-gray-900 border-r text-center" style={{borderColor: '#345915', borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
-                      {formatCurrency(Number(bill.totalBills))}
+                      {formatCurrency(typeof bill.totalBills === 'string' ? parseFloat(bill.totalBills) : Number(bill.totalBills))}
                     </td>
                     <td className="px-6 py-6 whitespace-nowrap text-gray-900 text-center" style={{borderBottom: index === bills.length - 1 ? 'none' : '1px solid #345915', fontSize: '20px'}}>
                       <div className="flex justify-center gap-2">
@@ -361,7 +402,7 @@ export default function ElectricityBillsPage() {
                   </label>
                   <input
                     type="text"
-                    value={editingBill.panel.namePanel}
+                    value={editingBill.panel?.namePanel || '-'}
                     disabled
                     className="w-full rounded-lg border border-gray-300 px-4 py-2 bg-gray-100"
                   />
@@ -446,6 +487,113 @@ export default function ElectricityBillsPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Export Success Modal */}
+        {showExportSuccessModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ paddingTop: '80px', top: 0 }}>
+            <div 
+              className="absolute inset-0 backdrop-blur-md bg-white/20"
+              onClick={handleCloseExportSuccessModal}
+            ></div>
+            
+            <div 
+              className="relative bg-white rounded-lg"
+              style={{
+                width: '408px',
+                height: '226px',
+                boxShadow: '0 35px 60px -12px rgba(94, 161, 39, 0.5), 0 0 0 1px rgba(94, 161, 39, 0.1)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <button
+                onClick={handleCloseExportSuccessModal}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
+              <div className="flex justify-center mb-4">
+                <div 
+                  className="w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{
+                    backgroundColor: '#5EA127',
+                    boxShadow: '0 15px 35px -5px rgba(94, 161, 39, 0.6), 0 0 0 1px rgba(94, 161, 39, 0.2)'
+                  }}
+                >
+                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="text-center">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Data berhasil diekspor!
+                </h3>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Export Error Modal */}
+        {showExportErrorModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ paddingTop: '80px', top: 0 }}>
+            <div 
+              className="absolute inset-0 backdrop-blur-md bg-white/20"
+              onClick={handleCloseExportErrorModal}
+            ></div>
+            
+            <div 
+              className="relative bg-white rounded-lg p-8"
+              style={{
+                width: '408px',
+                height: '226px',
+                boxShadow: '0 35px 60px -12px rgba(239, 68, 68, 0.5), 0 0 0 1px rgba(239, 68, 68, 0.1)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <button
+                onClick={handleCloseExportErrorModal}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
+              <div className="flex justify-center mb-6">
+                <div 
+                  className="w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{
+                    backgroundColor: '#ef4444',
+                    boxShadow: '0 15px 35px -5px rgba(239, 68, 68, 0.6), 0 0 0 1px rgba(239, 68, 68, 0.2)'
+                  }}
+                >
+                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="text-center">
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Data tidak berhasil diekspor!
+                </h3>
+                <p className="text-sm text-gray-500">
+                  {exportErrorMessage || '*Terjadi kesalahan saat mengekspor data'}
+                </p>
+              </div>
             </div>
           </div>
         )}

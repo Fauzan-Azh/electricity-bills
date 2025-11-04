@@ -27,6 +27,8 @@ export async function logout() {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('userUsername');
       // Redirect to login page
       window.location.href = '/login';
     }
